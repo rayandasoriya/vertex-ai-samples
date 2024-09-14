@@ -18,7 +18,6 @@ GCSFUSE_URI_PREFIX = "/gcs/"
 LOCAL_BASE_MODEL_DIR = "/tmp/base_model_dir"
 LOCAL_TEMPLATE_DIR = "/tmp/template_dir"
 _TEMPLATE_DIRNAME = "templates"
-_VERTEX_AI_NOTEBOOK_CONTENT_DIR = "/content"
 _VERTEX_AI_SAMPLES_GITHUB_REPO_NAME = "vertex-ai-samples"
 # TODO(dasoriya): Update the template directory after discussing with everyone.
 _VERTEX_AI_SAMPLES_GITHUB_TEMPLATE_DIR = (
@@ -177,11 +176,14 @@ def _format_template_fn(
 
     def format_fn(example: Dict[str, str]) -> Dict[str, str]:
       format_dict = {key: value for key, value in example.items()}
-      format_str = (
-          template_json[_PROMPT_INPUT_KEY]
-          if format_dict.get(input_column)
-          else template_json[_PROMPT_NO_INPUT_KEY]
-      )
+      if format_dict.get(input_column):
+        format_str = template_json[_PROMPT_INPUT_KEY]
+      elif _PROMPT_NO_INPUT_KEY in template_json:
+        format_str = template_json[_PROMPT_NO_INPUT_KEY]
+      else:
+        raise KeyError(
+            "Template does not contain prompt_input or prompt_no_input key."
+        )
       return {input_column: format_str.format(**format_dict)}
 
     return format_fn
@@ -251,8 +253,13 @@ def _github_template_path(template: str) -> str:
   Returns:
     The path to the template in the Vertex AI Samples GitHub repo.
   """
+  # vertex-ai-samples directory may lie under separate directory depending on
+  # the scratch_dir parameter in the notebook execution environment.
+  vertex_ai_samples_abs_path = os.getcwd().split(
+      _VERTEX_AI_SAMPLES_GITHUB_REPO_NAME
+  )[0]
   return os.path.join(
-      _VERTEX_AI_NOTEBOOK_CONTENT_DIR,
+      vertex_ai_samples_abs_path,
       _VERTEX_AI_SAMPLES_GITHUB_REPO_NAME,
       _VERTEX_AI_SAMPLES_GITHUB_TEMPLATE_DIR,
       template + ".json",
@@ -327,6 +334,7 @@ def validate_dataset_with_template(
     split: str,
     input_column: str,
     template: str,
+    tokenizer: transformers.PreTrainedTokenizer | None = None,
     use_multiprocessing: bool = False,
     validate_percentage_of_dataset: int | None = None,
     validate_k_rows_of_dataset: int | None = None,
@@ -347,6 +355,7 @@ def validate_dataset_with_template(
       used, and the input_column will be created.
     template: Name of the JSON template file under `templates/` or GCS path to
       the template file.
+    tokenizer: The tokenizer to use for chat_template templates.
     use_multiprocessing: If True, it will use multiprocessing to load the
       dataset.
     validate_percentage_of_dataset: The percentage of the dataset to load.
@@ -393,7 +402,7 @@ def validate_dataset_with_template(
       _format_template_fn(
           template_path,
           input_column=input_column,
-          tokenizer=None,
+          tokenizer=tokenizer,
       )
   )
 
