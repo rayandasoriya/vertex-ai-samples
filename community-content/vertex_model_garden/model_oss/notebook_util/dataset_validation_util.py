@@ -176,14 +176,11 @@ def _format_template_fn(
 
     def format_fn(example: Dict[str, str]) -> Dict[str, str]:
       format_dict = {key: value for key, value in example.items()}
-      if format_dict.get(input_column):
-        format_str = template_json[_PROMPT_INPUT_KEY]
-      elif _PROMPT_NO_INPUT_KEY in template_json:
-        format_str = template_json[_PROMPT_NO_INPUT_KEY]
-      else:
-        raise KeyError(
-            "Template does not contain prompt_input or prompt_no_input key."
-        )
+      format_str = (
+          template_json[_PROMPT_INPUT_KEY]
+          if format_dict.get(input_column)
+          else template_json[_PROMPT_NO_INPUT_KEY]
+      )
       return {input_column: format_str.format(**format_dict)}
 
     return format_fn
@@ -408,7 +405,6 @@ def validate_dataset_with_template(
 
   print(
       "Dataset {} is compatible with the {} template.".format(
-          dataset_name, template
+          os.path.basename(dataset_name), os.path.basename(template)
       )
   )
-
