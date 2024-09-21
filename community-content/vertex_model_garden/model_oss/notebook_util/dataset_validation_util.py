@@ -203,6 +203,82 @@ def _format_template_fn(
     }
 
 
+def _format_template_fn_notebook(
+    template: str,
+    input_column: str,
+    tokenizer: transformers.PreTrainedTokenizer | None = None,
+) -> Callable[[Dict[str, str]], Dict[str, str]]:
+  """Formats a dataset example according to a template.
+
+  Args:
+    template: Name of the JSON template file under `templates/` or GCS path to
+      the template file.
+    input_column: The input column in the dataset to be used or updated by the
+      template. If it does not exist, the template's `prompt_no_input` will be
+      used, and the input_column will be created.
+    tokenizer: The tokenizer to use for chat_template templates.
+
+  Returns:
+    A function that formats data according to the template.
+  """
+  template_json = get_template(template)
+
+  if _CHAT_TEMPLATE_KEY not in template_json:
+
+    def format_fn(example: Dict[str, str]) -> Dict[str, str]:
+      format_dict = {key: value for key, value in example.items()}
+      if format_dict.get(input_column):
+        format_str = template_json[_PROMPT_INPUT_KEY]
+      elif _PROMPT_NO_INPUT_KEY in template_json:
+        format_str = template_json[_PROMPT_NO_INPUT_KEY]
+      else:
+        raise KeyError(
+            f"The template {os.path.basename(template)} does not contain"
+            f" {_PROMPT_INPUT_KEY} or {_PROMPT_NO_INPUT_KEY} key."
+        )
+      try:
+        return {input_column: format_str.format(**format_dict)}
+      except KeyError as e:
+        raise KeyError(
+            f"The template {os.path.basename(template)} contains a key {e} in"
+            f" {_PROMPT_INPUT_KEY} or {_PROMPT_NO_INPUT_KEY} that does not"
+            " exist in the dataset example. The dataset example looks like"
+            f" {format_dict}."
+        ) from e
+
+    return format_fn
+  elif (
+      _PROMPT_INPUT_KEY in template_json
+      or _PROMPT_NO_INPUT_KEY in template_json
+  ):
+    raise ValueError(
+        f"chat_template templates do not support {_PROMPT_INPUT_KEY} or"
+        f" {_PROMPT_NO_INPUT_KEY} templates."
+    )
+  else:
+    if tokenizer is None:
+      raise ValueError("A tokenizer is required for chat_template templates.")
+    # Assign HuggingFace jinja template.
+    tokenizer.chat_template = template_json[_CHAT_TEMPLATE_KEY]
+
+    def format_fn(example: Dict[str, str]) -> Dict[str, str]:
+      try:
+        return {
+            input_column: tokenizer.apply_chat_template(
+                example[input_column],
+                tokenize=False,
+                add_generation_prompt=False,
+            )
+        }
+      except KeyError as e:
+        raise KeyError(
+            f"The template {os.path.basename(template)} contains a key {e} in"
+            f" {_CHAT_TEMPLATE_KEY} that does not exist in the dataset example."
+        ) from e
+
+    return format_fn
+
+
 def _get_split_string(
     split: str,
     dataset_percent: int | None = None,
@@ -396,7 +472,7 @@ def validate_dataset_with_template(
     )
 
   _get_dataset(dataset_name, split, num_proc).map(
-      _format_template_fn(
+      _format_template_fn_notebook(
           template_path,
           input_column=input_column,
           tokenizer=tokenizer,
